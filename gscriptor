@@ -21,7 +21,7 @@
 # gscriptor uses libgtk-perl, please make sure it is correctly installed
 # on your system
 
-# $Id$
+# $Id: gscriptor 6148 2011-12-18 12:44:40Z rousseau $
 
 use strict;
 use warnings;
@@ -54,7 +54,7 @@ my $wndMain   = Gtk2::Window->new("toplevel");
 my $txtScript = Gtk2::TextView->new;
 my $txtResult = Gtk2::TextView->new;
 my $rdbASCII  = Gtk2::RadioButton->new_with_label(undef, "ASCII");
-my $rdbHex    = Gtk2::RadioButton->new_with_label($rdbASCII->get_group(), "Hex");
+my $rdbHex    = Gtk2::RadioButton->new_with_label($rdbASCII->get_group(), "HEXA");
 my $chkWrap   = Gtk2::CheckButton->new("Wrap lines");
 my $btnRun    = Gtk2::Button->new("Run");
 my $txtStatus = Gtk2::Entry->new;
@@ -299,9 +299,6 @@ ReadConfigFile();
 
 ############################### create widgets ###############################
 
-$txtStatus->set_text ("welcome to the $strAppName application! - not connected");
-
-# Show up everything as we should be ready by now
 $wndMain->show_all();
 
 if (exists $hConfig{'script'}) {
@@ -634,7 +631,7 @@ sub RefreshResult {
 	my $textbuffer = $txtResult->get_buffer;
 	my $tmp_text;
 	my $state = 0;	# text
-
+	
 	$textbuffer->set_text ("");
 	my $iter = $textbuffer->get_end_iter;
 	foreach $tmpLine (@ResultStruct) {
@@ -650,25 +647,29 @@ sub RefreshResult {
 						$c = 0;
 					}
 				}
-			} else {
-				my $c = 0;
-				foreach $tmp_value (@$tmpLine) {
-					# TODO: enhance filtering of non-printable chars
-					# TODO: how can we use array_to_ascii here??? maybe
-					# enhence the function so it can directly receive
-					# ranges of chars to ignore optionally?
-					if (($tmp_value >= 0x20) && ($tmp_value < 0x80)) {
-						$tmp_text .= chr ($tmp_value);
-					} else {
-						$tmp_text .= ".";
-					}
-					if ($c++ == 32)
-					{
-						$tmp_text .= "\n";
-						$c = 0;
-					}
+			} 
+			$tmp_text .= "\t\t\t\t;";
+			my $c = 0;
+			foreach $tmp_value (@$tmpLine) {
+				# TODO: enhance filtering of non-printable chars
+				# TODO: how can we use array_to_ascii here??? maybe
+				# enhence the function so it can directly receive
+				# ranges of chars to ignore optionally?
+				
+				if (($tmp_value >= 0x20) && ($tmp_value < 0x80)) {
+
+					$tmp_text .= chr ($tmp_value);
+				} else {
+
+					$tmp_text .= ".";
+				}
+				if ($c++ == 32)	
+				{
+		  			$tmp_text .= "\n";
+					$c = 0;
 				}
 			}
+			
 			$textbuffer->insert_with_tags_by_name ($iter, "$tmp_text\n",
 			"monospace", $state ? "red" : "blue");
 		} else {
@@ -677,6 +678,7 @@ sub RefreshResult {
 			$state = 1 if ($tmpLine =~ m/Received/);
 		}
 	}
+		
 }
 
 sub ConnectDefaultReader {
@@ -803,89 +805,252 @@ sub DefaultReaderStatus {
 	}
 }
 
+# TruncateRight : This lets us select return bytes by their positional parameter
+
+sub TruncateRight{
+
+	my $string = $_[0];
+	my $nb_chars;
+	my $inside;
+
+	$string =~ m/.*"(.*)";(\d+)/;
+	$inside = $1;
+	$nb_chars = $2;
+
+	# We take $nb_chars characters from the initial string
+	$inside = substr($inside,0,$nb_chars);
+	
+	# Converting the substring to HEX
+	$inside =~ s/(.)/sprintf("%x",ord($1))/eg;
+
+	# We get only the HEX command if it exists
+	# E.g. If the input is 84 10 00 02"abcd";2
+	# after the below substitution we get only 84 10 00 02
+        $string =~ s/\".*$// ;#/
+	
+	# Remove spaces
+	$string =~ s/\s//g;
+
+	# we return the command (if it is provided) followed by the substring
+	$string = $string.$inside;	
+
+	return $string;
+}
+
+# TruncateLeft : This lets us select return bytes by their positional parameter
+
+
+sub TruncateLeft{
+    
+    my $string = $_[0];
+    my $nb_chars;
+    my $inside;
+    
+    $string =~ m/.*"(.*)":(\d+)/;
+    $inside = $1;
+    $nb_chars = $2;
+    
+    # We take $nb_chars characters from the initial string
+    $inside = substr($inside,-$nb_chars);
+    
+    # Converting the substring to HEX
+    $inside =~ s/(.)/sprintf("%x",ord($1))/eg;
+    
+    # We get only the HEX command if it exists
+    # E.g. If the input is 84 10 00 02"abcd";2
+    # after the below substitution we get only 84 10 00 02
+    $string =~ s/\".*$// ;#/
+    
+    # Remove spaces
+    $string =~ s/\s//g;
+    
+    # we return the command (if it is provided) followed by the substring
+    $string = $string.$inside;	
+    
+    return $string;
+}
+
 sub RunScript {
-	if (defined $hCard->{hCard}) {
-		my $textbuffer = $txtScript->get_buffer;
-
-		my @tmpCommandArray = split /\n/, $textbuffer->get_text($textbuffer->get_start_iter, $textbuffer->get_end_iter, 1);
-		my $raCurrentResult;
-		my $nIndex;
-		my $cmd;
-
-		push @ResultStruct, "Beginning script execution...\n\n";
-		foreach $_ (@tmpCommandArray) {
-			# this variable has to be inside the loop as we store a
-			# reference to it in the result struct... it has to be
-			# unique for each command line
-			my $raCurrentCommand;
-
-			# Skip blank lines and comments
-			next if /^\s*$/;
-			next if /^#/;
-
-			if (/reset/i) {
-				push @ResultStruct, "[Reset]\n";
-				ReconnectDefaultReader();
-				push @ResultStruct, "ATR: ";
-				my @s = $hCard->Status();
-				push @ResultStruct, \@{$s[3]};
-				push @ResultStruct, "\n";
-				next;
-			}
-
-			# if the command does not contains spaces (00A4030000) we expand it
-			s/(..)/$1 /g if (! m/ /);
-
-			# continue if line ends in \
-			if (m/\\$/)
-			{
-				chop;   # remove the \
-				s/ *$/ /;   # replace any spaces by ONE space
-				$cmd .= $_;
-				next;   # read next line
-			}
-
-			$cmd .= $_;
-
-			# Extract bytes from the ascii string
-			$raCurrentCommand = Chipcard::PCSC::ascii_to_array($cmd);
-			$cmd = "";
-
-			# push them in the Display structure
-			push @ResultStruct, "Sending: ";
-			push @ResultStruct, $raCurrentCommand;
-			
-			# Transmit them to the card
-			$raCurrentResult = $hCard->Transmit ($raCurrentCommand);
-			if (ref $raCurrentResult) {
-				push @ResultStruct, "Received: ";
-				push @ResultStruct, $raCurrentResult;
-				push @ResultStruct, Chipcard::PCSC::Card::ISO7816Error(substr Chipcard::PCSC::array_to_ascii($raCurrentResult), -5), "\n\n";
-			} else {
-				MessageBox ("Transmit failed: $Chipcard::PCSC::errno\nStopping script execution", "error", ['OK']);
-				push @ResultStruct, "\nErrors During Script Execution: $Chipcard::PCSC::errno\n";
-				last;
-			}
+    if (defined $hCard->{hCard}) {
+	my $textbuffer = $txtScript->get_buffer;
+	
+	my @tmpCommandArray = split /\n/, $textbuffer->get_text($textbuffer->get_start_iter, $textbuffer->get_end_iter, 1);
+	my $raCurrentResult;
+	my $nIndex;
+	my $cmd;
+	my @buff;
+	my $kra;
+	my $kra1;
+	my $string;
+	my $i;	
+	my $kra2;
+	my $cara2;
+	my $cara3;
+	my $cara4;
+	my $inside;
+	
+	
+	push @ResultStruct, "Beginning script execution...\t\t\t\t ASCII:\n\n";
+	foreach $_ (@tmpCommandArray) {
+	    # this variable has to be inside the loop as we store a
+	    # reference to it in the result struct... it has to be
+	    # unique for each command line
+	    my $raCurrentCommand;
+	    
+	    # Skip blank lines and comments
+	    
+	    next if /^\s*$/;
+	    next if /^#/;
+	    
+	    if (/reset/i) {
+		push @ResultStruct, "[Reset]\n";
+		ReconnectDefaultReader();
+		push @ResultStruct, "ATR: ";
+		
+		my @s = $hCard->Status();
+		push @ResultStruct, \@{$s[3]};
+		push @ResultStruct, "\n";
+		next;
+	    }
+	    
+	    # remove the spaces in the beginning of the character chain
+	    s/^\s+// ;
+	    
+	    # replace multiple spaces by a single one
+	    
+	    s/\s+/ /g ;
+	    
+	    $kra=0 ;
+	    $kra1=0;
+	    $string .=$_;
+	    
+	    
+	    
+	    # introducing comments: users can put inline comments into the 
+	    # script window. In order to be smart-access compatible, lines beginning
+	    # with the the star symbol (*) are considered as comments.
+	    
+	    if ( $string =~ /\*(.*)/){
+		next;   # read next line
+	    }
+	    
+	    
+	    # truncate to the right. This lets us select return bytes by their positional parameter
+	    
+	    $_=$string;
+	    if ( $string =~ /\"(.*)\;/ ){
+		if($string =~ /\"(.*)\"/ ){
+		    $string=TruncateRight($string);	
 		}
-		push @ResultStruct, "Script was executed without error...\n";
-	} else {
-		MessageBox ("The Chipcard::PCSC::Card object is not connected!\nDo you want to connect?",
-		"question",
-		['CANCEL'],
-		['OK', sub {ConnectDefaultReader(); if (defined $hCard->{hCard}) {RunScript();}}]);
+	    }
+	    $_=$string;
+	    # multiply the character string.
+	    # "foo".2 -> foofoo
+	    
+	    if ( $string =~ /\"(.*)\./ ){
+		if($string =~ /\"(.*)\"/){
+		    $inside = $1;
+		    $kra1 = substr($string,-1);
+		    $cara2 = substr($string,-2);
+		    $cara3 = substr($string,-3);
+		    $cara4=$kra1+$cara2+$cara3;
+		    $inside=~s/(.)/sprintf("%x",ord($1))/eg;
+		    $string =~s /\"(.*)\.(.*)// ;#/
+		    $string =~ s/\s//g; #remove spaces
+		    $string= $string.$inside x $cara4 ;
+		    $_= $string;
+		} 
+	    }
+	    $_=$string;
+	    # truncate to the left This lets us select return bytes by their positional parameter
+	    
+	    if ( $string =~ /\"(.*)\:/ ){
+		if($string =~ /\"(.*)\"/ ){
+		    $string=TruncateLeft($string);
+		}
+		
+	    }
+	    $_=$string;
+	    
+	    # transform ascii to hexa
+	    if ( $string =~ /\"(.*)\"/ )
+	    {
+		$inside = $1;
+		$inside=~s/(.)/sprintf("%x",ord($1))/eg;
+		$string =~s /\"(.*)\"// ;#/
+		$string =~ s/\s//g; #remove spaces
+		$string= $string.$inside;
+		$_= $string;
+	    }
+	    $_=$string;
+	    
+	    
+	    # if the command does not contains spaces (00A4030000) we expand it
+	    
+	    
+	    
+	    if (! m/ /){
+		
+		s/(..)/$1 /g ;
+		
+	    }
+	    
+	    
+	    if (m/\\$/)
+		
+	    {
+		chop;   # remove the \
+		s/ *$/ /;   # replace any spaces by ONE space
+		$cmd .= $_;
+		next;   # read next line
+	    }
+	    
+	    $cmd .= $_;
+	    
+	    # Extract bytes from the ascii string
+	    $raCurrentCommand = Chipcard::PCSC::ascii_to_array($cmd);
+	    $cmd = "";
+	    
+	    # push them in the Display structure
+	    push @ResultStruct, "Sending:";
+	    push @ResultStruct, $raCurrentCommand;
+	    
+	    
+	    # Transmit them to the card
+	    
+	    $raCurrentResult = $hCard->Transmit ($raCurrentCommand);		
+	    if (ref $raCurrentResult) {
+		
+		
+		push @ResultStruct, "Received: ";
+		push @ResultStruct ,$raCurrentResult;
+		push @ResultStruct, Chipcard::PCSC::Card::ISO7816Error(substr Chipcard::PCSC::array_to_ascii($raCurrentResult), -5), "\n\n";
+		
+	    } else {
+		MessageBox ("Transmit failed: $Chipcard::PCSC::errno\nStopping script execution", "error", ['OK']);
+		push @ResultStruct, "\nErrors During Script Execution: $Chipcard::PCSC::errno\n";
+		last;
+	    }
 	}
-	RefreshResult();
+	push @ResultStruct, "Script was executed without error...\n";
+    } else {
+	MessageBox ("The Chipcard::PCSC::Card object is not connected!\nDo you want to connect?",
+		    "question",
+		    ['CANCEL'],
+		    ['OK', sub {ConnectDefaultReader(); if (defined $hCard->{hCard}) {RunScript();}}]);
+    }
+    RefreshResult();
 }
 
 sub CloseAppWindow {
-	undef $hCard;
-	undef $hContext;
-	WriteConfigFile();
-	Gtk2->main_quit();
+    undef $hCard;
+    undef $hContext;
+    WriteConfigFile();
+    Gtk2->main_quit();
 }
 
 sub Help {
-MessageBox ("
+    MessageBox ("
 $strAppName is coded by Lionel VICTOR, (C) 2001.
 and debugged & improved by Ludovic ROUSSEAU, (C) 2001-2006.
 
@@ -893,8 +1058,9 @@ $strAppName is (was) a small application written in Perl.
 It basically demonstrates how easy it is to develop a
 quick working prototype that uses smartcards in Perl.
 ", "info",
-['OK']
-);
+		['OK']
+	);
 }
 
 # End of File #
+
