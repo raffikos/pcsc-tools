@@ -808,33 +808,33 @@ sub DefaultReaderStatus {
 # TruncateRight : This lets us select return bytes by their positional parameter
 
 sub TruncateRight{
+    
+    my $string = $_[0];
+    my $nb_chars;
+    my $inside;
+    
+    $string =~ m/.*"(.*)";(\d+)/;
+    $inside = $1;
+    $nb_chars = $2;
+    
+    # We take $nb_chars characters from the initial string
+    $inside = substr($inside,0,$nb_chars);
+    
+    # Converting the substring to HEX
+    $inside =~ s/(.)/sprintf("%x",ord($1))/eg;
+    
+    # We get only the HEX command if it exists
+    # E.g. If the input is 84 10 00 02"abcd";2
+    # after the below substitution we get only 84 10 00 02
+    $string =~ s/\".*$// ;#/
+    
+    # Remove spaces
+    $string =~ s/\s//g;
 
-	my $string = $_[0];
-	my $nb_chars;
-	my $inside;
-
-	$string =~ m/.*"(.*)";(\d+)/;
-	$inside = $1;
-	$nb_chars = $2;
-
-	# We take $nb_chars characters from the initial string
-	$inside = substr($inside,0,$nb_chars);
-	
-	# Converting the substring to HEX
-	$inside =~ s/(.)/sprintf("%x",ord($1))/eg;
-
-	# We get only the HEX command if it exists
-	# E.g. If the input is 84 10 00 02"abcd";2
-	# after the below substitution we get only 84 10 00 02
-        $string =~ s/\".*$// ;#/
-	
-	# Remove spaces
-	$string =~ s/\s//g;
-
-	# we return the command (if it is provided) followed by the substring
+    # we return the command (if it is provided) followed by the substring
 	$string = $string.$inside;	
-
-	return $string;
+    
+    return $string;
 }
 
 # TruncateLeft : This lets us select return bytes by their positional parameter
@@ -870,6 +870,65 @@ sub TruncateLeft{
     return $string;
 }
 
+#convert ascii to hexa
+
+sub AsciiToHex{
+    my $string = $_[0];
+    my $inside;
+    
+    $string =~ m/.*"(.*)"/;
+    $inside = $1;
+    $inside =~ s/(.)/sprintf("%x",ord($1))/eg;
+    $string =~ s/\"(.*)\"// ;#/
+    $string =~ s/\s//g; #remove spaces
+    $string = $string.$inside;
+    return $string;	
+}
+
+# We get the buffer and transform it into a string, 
+# then we fill with zeros up to the size of the buffer.
+
+sub DisplayBuffer {
+    
+    my @buff = @_;
+    my $i;
+    my $string;
+    $string = "@buff";
+    for ($i=scalar(@buff) ; $i<256 ;$i++){
+	$string = $string . "00";
+    }
+    return $string;
+}
+
+# E.g. If the input is 84 10 00 00 02
+# we recover the buffer with the command @buffer
+# we can aply the TrancationLeft and Right in the same time to the buffer e.g: [buffer;2]:1 or [buffer:2];1
+# This lets us select return bytes by their positional parameter
+
+sub BufferTrunca{
+    my @var = @_;
+    my $string = $var[256];
+    my $string2;
+    my $nb_chars;
+    my $nb_chars2;
+    my $i;
+    
+    $string =~ m/.*;(\d+)]:(\d+)/;
+    $nb_chars = $1;
+    $nb_chars2 = $2;
+    $string =~ s/\[.*$// ;#/
+    $string =~ s/\s//g; #remove spaces
+    $string2 = $string;
+    
+    for($i=0;$i<$nb_chars;$i++){
+	$string= $string.$var[$i];
+    }
+    $string = substr($string,(-$nb_chars2)*2);
+    $string2 = $string2.$string;
+    $string = $string2;
+    return $string;
+}
+
 sub RunScript {
     if (defined $hCard->{hCard}) {
 	my $textbuffer = $txtScript->get_buffer;
@@ -888,7 +947,9 @@ sub RunScript {
 	my $cara3;
 	my $cara4;
 	my $inside;
-	
+	my $longueur;
+	my $string2;
+	my $string3;
 	
 	push @ResultStruct, "Beginning script execution...\t\t\t\t ASCII:\n\n";
 	foreach $_ (@tmpCommandArray) {
@@ -962,6 +1023,7 @@ sub RunScript {
 		} 
 	    }
 	    $_=$string;
+	    
 	    # truncate to the left This lets us select return bytes by their positional parameter
 	    
 	    if ( $string =~ /\"(.*)\:/ ){
@@ -972,15 +1034,29 @@ sub RunScript {
 	    }
 	    $_=$string;
 	    
-	    # transform ascii to hexa
-	    if ( $string =~ /\"(.*)\"/ )
-	    {
-		$inside = $1;
-		$inside=~s/(.)/sprintf("%x",ord($1))/eg;
-		$string =~s /\"(.*)\"// ;#/
-		$string =~ s/\s//g; #remove spaces
-		$string= $string.$inside;
-		$_= $string;
+	    #buffer trancation left and right and display the buffer
+	    
+	    if ($string =~/\@buffer/){
+		$string = DisplayBuffer(@buff);
+	    }
+	    $_=$string;
+	    
+	    
+	    if ($string =~/\[buffer(.*)]\:/){
+		$string = BufferTrunca(@buff,$string);
+	    }
+	    $_= $string;
+		
+		# transform ascii to hexa
+		
+		if ( $string =~ /\"(.*)\"/ ){
+		    
+		    $inside = $1;
+		    $inside=~s/(.)/sprintf("%x",ord($1))/eg;
+		    $string =~s /\"(.*)\"// ;#/
+		    $string =~ s/\s//g; #remove spaces
+		    $string= $string.$inside;
+		    $_= $string;
 	    }
 	    $_=$string;
 	    
@@ -1018,22 +1094,29 @@ sub RunScript {
 	    
 	    # Transmit them to the card
 	    
-	    $raCurrentResult = $hCard->Transmit ($raCurrentCommand);		
-	    if (ref $raCurrentResult) {
-		
-		
-		push @ResultStruct, "Received: ";
-		push @ResultStruct ,$raCurrentResult;
-		push @ResultStruct, Chipcard::PCSC::Card::ISO7816Error(substr Chipcard::PCSC::array_to_ascii($raCurrentResult), -5), "\n\n";
-		
-	    } else {
-		MessageBox ("Transmit failed: $Chipcard::PCSC::errno\nStopping script execution", "error", ['OK']);
-		push @ResultStruct, "\nErrors During Script Execution: $Chipcard::PCSC::errno\n";
-		last;
-	    }
-	}
-	push @ResultStruct, "Script was executed without error...\n";
-    } else {
+	$raCurrentResult = $hCard->Transmit ($raCurrentCommand);
+			
+			if (ref $raCurrentResult) {
+				my $raCurrentAsciiResult=Chipcard::PCSC::array_to_ascii($raCurrentResult);
+			        @buff = split(/ /,$raCurrentAsciiResult);
+				$longueur = scalar(@buff);
+				for ($i=$longueur ; $i<256 ;$i++){
+					$buff[$i] = "00";
+					
+				}
+				
+				push @ResultStruct, "Received: ";
+				push @ResultStruct ,$raCurrentResult;
+				push @ResultStruct, Chipcard::PCSC::Card::ISO7816Error(substr Chipcard::PCSC::array_to_ascii($raCurrentResult), -5), "\n\n";
+			
+			} else {
+				MessageBox ("Transmit failed: $Chipcard::PCSC::errno\nStopping script execution", "error", ['OK']);
+				push @ResultStruct, "\nErrors During Script Execution: $Chipcard::PCSC::errno\n";
+				last;
+			}
+		}
+		push @ResultStruct, "Script was executed without error...\n";
+	} else {
 	MessageBox ("The Chipcard::PCSC::Card object is not connected!\nDo you want to connect?",
 		    "question",
 		    ['CANCEL'],
