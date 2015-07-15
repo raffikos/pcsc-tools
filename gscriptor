@@ -830,9 +830,9 @@ sub TruncateRight{
     
     # Remove spaces
     $string =~ s/\s//g;
-
+    
     # we return the command (if it is provided) followed by the substring
-	$string = $string.$inside;	
+    $string = $string.$inside;	
     
     return $string;
 }
@@ -929,6 +929,64 @@ sub BufferTrunca{
     return $string;
 }
 
+sub BufferTruncaLeft{
+	my @var = @_;
+	my $string = $var[256];
+	my $nb_chars;
+	my $i;
+	
+	$string =~ m/.*:(\d+)/;
+	$nb_chars = $1;
+	$string =~ s/buffer.*$// ;#/
+	$string =~ s/\s//g; #remove spaces
+	
+	
+	for ($i=256-$nb_chars ; $i<256 ;$i++){
+	    $string = $string . $var[$i];
+	}
+	return $string;
+	
+}
+
+sub BufferTruncaRight{
+    my @var = @_;
+    my $string = $var[256];
+    my $nb_chars;
+    my $i;
+    
+    $string =~ m/.*;(\d+)/;
+    $nb_chars = $1;
+    $string =~ s/buffer.*$// ;#/
+    $string =~ s/\s//g; #remove spaces
+    for ($i=0 ; $i<$nb_chars ;$i++){
+	$string = $string . $var[$i];
+    }
+    return $string;
+}
+
+# multiply the character string.
+# "foo".2 -> foofoo
+
+sub Multiply{
+    my $nb_chars;
+    my $string = $_[0];
+    my $inside;
+
+    $string =~ m/.*"(.*)".(\d+)/;
+    $inside = $1;
+    $nb_chars=$2;
+    $inside =~ s/(.)/sprintf("%x",ord($1))/eg;
+    $string =~ s/\".*$// ;#/
+    $string =~ s/\s//g; #remove spaces
+    
+    # we return the result of the multiply (x)
+    $string=$string.$inside x $nb_chars;
+    
+    return $string;   
+    
+}
+
+
 sub RunScript {
     if (defined $hCard->{hCard}) {
 	my $textbuffer = $txtScript->get_buffer;
@@ -938,18 +996,9 @@ sub RunScript {
 	my $nIndex;
 	my $cmd;
 	my @buff;
-	my $kra;
-	my $kra1;
 	my $string;
 	my $i;	
-	my $kra2;
-	my $cara2;
-	my $cara3;
-	my $cara4;
-	my $inside;
-	my $longueur;
-	my $string2;
-	my $string3;
+
 	
 	push @ResultStruct, "Beginning script execution...\t\t\t\t ASCII:\n\n";
 	foreach $_ (@tmpCommandArray) {
@@ -981,8 +1030,7 @@ sub RunScript {
 	    
 	    s/\s+/ /g ;
 	    
-	    $kra=0 ;
-	    $kra1=0;
+	   
 	    $string .=$_;
 	    
 	    
@@ -1005,24 +1053,15 @@ sub RunScript {
 		}
 	    }
 	    $_=$string;
+	    
 	    # multiply the character string.
 	    # "foo".2 -> foofoo
 	    
 	    if ( $string =~ /\"(.*)\./ ){
 		if($string =~ /\"(.*)\"/){
-		    $inside = $1;
-		    $kra1 = substr($string,-1);
-		    $cara2 = substr($string,-2);
-		    $cara3 = substr($string,-3);
-		    $cara4=$kra1+$cara2+$cara3;
-		    $inside=~s/(.)/sprintf("%x",ord($1))/eg;
-		    $string =~s /\"(.*)\.(.*)// ;#/
-		    $string =~ s/\s//g; #remove spaces
-		    $string= $string.$inside x $cara4 ;
-		    $_= $string;
-		} 
+		    $string=Multiply($string);
+}
 	    }
-	    $_=$string;
 	    
 	    # truncate to the left This lets us select return bytes by their positional parameter
 	    
@@ -1034,7 +1073,7 @@ sub RunScript {
 	    }
 	    $_=$string;
 	    
-	    #buffer trancation left and right and display the buffer
+	    #buffer trancation left and right combinated e.g:[buffer;2]:1 or [buffer:2];1 and display the buffer
 	    
 	    if ($string =~/\@buffer/){
 		$string = DisplayBuffer(@buff);
@@ -1046,19 +1085,31 @@ sub RunScript {
 		$string = BufferTrunca(@buff,$string);
 	    }
 	    $_= $string;
-		
-		# transform ascii to hexa
-		
-		if ( $string =~ /\"(.*)\"/ ){
-		    
-		    $inside = $1;
-		    $inside=~s/(.)/sprintf("%x",ord($1))/eg;
-		    $string =~s /\"(.*)\"// ;#/
-		    $string =~ s/\s//g; #remove spaces
-		    $string= $string.$inside;
-		    $_= $string;
+	    
+	    #buffer trancation left and right combinate:e.g buffer;2
+	    
+	    if ($string =~/buffer\;/){
+		$string = BufferTruncaRight(@buff,$string);
 	    }
 	    $_=$string;
+	    
+	    #buffer trancation left and right combinate:e.g buffer:2
+	    if ($string =~/buffer\:/){
+		$string = BufferTruncaLeft(@buff,$string);
+	    }
+	    $_=$string;
+	    
+	    
+	    
+	    # transform ascii to hexa
+	    
+	    if ( $string =~ /\"(.*)\"/ )
+	    {
+		$string=AsciiToHex($string);
+		
+	    }
+	    $_=$string;
+	    
 	    
 	    
 	    # if the command does not contains spaces (00A4030000) we expand it
@@ -1094,29 +1145,27 @@ sub RunScript {
 	    
 	    # Transmit them to the card
 	    
-	$raCurrentResult = $hCard->Transmit ($raCurrentCommand);
-			
-			if (ref $raCurrentResult) {
-				my $raCurrentAsciiResult=Chipcard::PCSC::array_to_ascii($raCurrentResult);
-			        @buff = split(/ /,$raCurrentAsciiResult);
-				$longueur = scalar(@buff);
-				for ($i=$longueur ; $i<256 ;$i++){
-					$buff[$i] = "00";
-					
-				}
-				
-				push @ResultStruct, "Received: ";
-				push @ResultStruct ,$raCurrentResult;
-				push @ResultStruct, Chipcard::PCSC::Card::ISO7816Error(substr Chipcard::PCSC::array_to_ascii($raCurrentResult), -5), "\n\n";
-			
-			} else {
-				MessageBox ("Transmit failed: $Chipcard::PCSC::errno\nStopping script execution", "error", ['OK']);
-				push @ResultStruct, "\nErrors During Script Execution: $Chipcard::PCSC::errno\n";
-				last;
-			}
+	    $raCurrentResult = $hCard->Transmit ($raCurrentCommand);
+	    
+	    if (ref $raCurrentResult) {
+		my $raCurrentAsciiResult=Chipcard::PCSC::array_to_ascii($raCurrentResult);
+		@buff = split(/ /,$raCurrentAsciiResult);
+		for ($i=scalar(@buff) ; $i<256 ;$i++){
+		    $buff[$i] = "00";
+		    
 		}
-		push @ResultStruct, "Script was executed without error...\n";
-	} else {
+		push @ResultStruct, "Received: ";
+		push @ResultStruct ,$raCurrentResult;
+		push @ResultStruct, Chipcard::PCSC::Card::ISO7816Error(substr Chipcard::PCSC::array_to_ascii($raCurrentResult), -5), "\n\n";
+		
+	    } else {
+		MessageBox ("Transmit failed: $Chipcard::PCSC::errno\nStopping script execution", "error", ['OK']);
+		push @ResultStruct, "\nErrors During Script Execution: $Chipcard::PCSC::errno\n";
+		last;
+	    }
+	}
+	push @ResultStruct, "Script was executed without error...\n";
+    } else {
 	MessageBox ("The Chipcard::PCSC::Card object is not connected!\nDo you want to connect?",
 		    "question",
 		    ['CANCEL'],
